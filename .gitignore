@@ -7,6 +7,9 @@ __pycache__/
 *.egg-info/
 *.egg
 
+# Claude Code
+.claude/
+
 # IDE
 .vscode/
 .idea/
