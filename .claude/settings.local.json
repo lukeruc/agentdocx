@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip3 --version)",
+      "Bash(pip3 list *)",
+      "Bash(pip install *)",
+      "Bash(python3 *)",
+      "BypassPermissions",
+      "Bash(pip list *)",
+      "Bash(pip uninstall *)",
+      "Read(//home/luke/.claude/**)",
+      "Read(//home/luke/projects/docx-mcp/**)",
+      "Bash(pip show *)",
+      "Read(//home/luke/miniconda3/envs/tools/lib/python3.12/site-packages/**)",
+      "mcp__ide__executeCode",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  },
+  "mcpServers": {
+    "agentdocx": {
+      "command": "python3",
+      "args": [
+        "-m",
+        "agentdocx.server"
+      ],
+      "cwd": "/home/luke/projects/agentdocx"
+    }
+  }
+}

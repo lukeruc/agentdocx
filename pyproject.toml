@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentdocx"
+version = "0.1.0"
+description = "Claude Code-integrable Word (.docx) document editing toolkit with track changes, comments, and formatting"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "agentdocx"}
+]
+dependencies = [
+    "python-docx>=0.8.11",
+    "lxml>=4.9.0",
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+agentdocx = "agentdocx.server:run"
+
+[tool.setuptools.packages.find]
+where = ["mcp"]

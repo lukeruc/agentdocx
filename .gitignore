@@ -1,0 +1,16 @@
+# Test documents
+*.docx
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
