@@ -65,5 +65,6 @@ docx_open → docx_search/docx_get_text → docx_batch → docx_save
 2. **Always `track_changes:true`** for text modifications.
 3. **Save to new file** when reviewing — don't overwrite original.
 4. Font size in half-points (12pt=24). Indentation in twips (1inch=1440).
+5. **When editing Chinese documents, use Chinese curly quotes** `""` `''` not ASCII straight quotes `""` `''`. The document text almost always uses curly quotes, and the find-based locator will auto-normalize them, but the inserted/replacement text should also use proper Chinese punctuation.
 
 For detailed reference: read `skill/reference.md`.

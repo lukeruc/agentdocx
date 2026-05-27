@@ -15,7 +15,7 @@ from .oxml_helpers import (
     tag, make_element, child, children,
     text_content, get_next_revision_id,
     split_run_element_at, insert_after,
-    ensure_rPr,
+    ensure_rPr, clone_element,
 )
 
 
@@ -73,7 +73,7 @@ def insert_text(
                 if local_offset == 0:
                     # Insert right before this run
                     if track_changes:
-                        ins = _create_ins_element(body, text, author)
+                        ins = _create_ins_element(body, text, author, child_el)
                         _insert_before_in_parent(para, child_el, ins)
                     else:
                         _insert_text_direct(child_el, text, at_start=True)
@@ -81,7 +81,7 @@ def insert_text(
                 elif local_offset == len(t):
                     # Insert right after this run
                     if track_changes:
-                        ins = _create_ins_element(body, text, author)
+                        ins = _create_ins_element(body, text, author, child_el)
                         insert_after(child_el, ins)
                     else:
                         _insert_text_direct(child_el, text, at_start=False)
@@ -93,7 +93,7 @@ def insert_text(
                     para.replace(child_el, left)
 
                     if track_changes:
-                        ins = _create_ins_element(body, text, author)
+                        ins = _create_ins_element(body, text, author, left)
                         insert_after(left, ins)
                     else:
                         # Append the text to left run
@@ -110,20 +110,20 @@ def insert_text(
             for r in children(child_el, "r"):
                 t = text_content(r)
                 if accumulated + len(t) > offset:
-                    # Inserting inside a tracked insertion - just put text in the insertion
+                    # Inserting inside a tracked insertion
                     local_offset = offset - accumulated
                     if local_offset == 0:
-                        new_r = _make_text_run(text)
+                        new_r = _make_text_run(text, r)
                         child_el.insert(list(child_el).index(r), new_r)
                     elif local_offset >= len(t):
-                        new_r = _make_text_run(text)
+                        new_r = _make_text_run(text, r)
                         idx = list(child_el).index(r)
                         child_el.insert(idx + 1, new_r)
                     else:
                         # Split the run inside the insertion
                         left_r, right_r = split_run_element_at(r, local_offset)
                         child_el.replace(r, left_r)
-                        new_r = _make_text_run(text)
+                        new_r = _make_text_run(text, left_r)
                         insert_after(left_r, new_r)
                         insert_after(new_r, right_r)
                     return {"status": "ok", "message": f"Inserted '{text}' at paragraph offset {offset}"}
@@ -137,13 +137,13 @@ def insert_text(
                         del_texts.append(dt.text)
                 t = "".join(del_texts)
                 if accumulated + len(t) > offset:
-                    # Inserting inside deleted text - insert after the deletion element
+                    # Find neighboring run for format inheritance
+                    ref = _find_neighbor_text_run(para, child_el)
                     if track_changes:
-                        ins = _create_ins_element(body, text, author)
+                        ins = _create_ins_element(body, text, author, ref)
                         insert_after(child_el, ins)
                     else:
-                        # Add as regular run after the deletion
-                        new_r = _make_text_run(text)
+                        new_r = _make_text_run(text, ref)
                         insert_after(child_el, new_r)
                     return {"status": "ok", "message": f"Inserted '{text}' at paragraph offset {offset}"}
                 accumulated += len(t)
@@ -154,6 +154,51 @@ def insert_text(
     return _insert_at_end(para, body, text, author, track_changes)
 
 
+def _find_last_text_run(para: etree._Element) -> Optional[etree._Element]:
+    """Find the last text-bearing run in a paragraph for format inheritance."""
+    for child_el in reversed(list(para)):
+        if child_el.tag == tag("r"):
+            t = child(child_el, "t")
+            if t is not None and t.text:
+                return child_el
+        elif child_el.tag == tag("ins"):
+            runs = children(child_el, "r")
+            if runs:
+                return runs[-1]
+    return None
+
+
+def _find_neighbor_text_run(para: etree._Element, target: etree._Element) -> Optional[etree._Element]:
+    """Find the nearest text run before or after target for format inheritance."""
+    children_list = list(para)
+    try:
+        idx = children_list.index(target)
+    except ValueError:
+        return None
+
+    # Look backwards
+    for i in range(idx - 1, -1, -1):
+        el = children_list[i]
+        if el.tag == tag("r"):
+            return el
+        if el.tag == tag("ins"):
+            runs = children(el, "r")
+            if runs:
+                return runs[-1]
+
+    # Look forwards
+    for i in range(idx + 1, len(children_list)):
+        el = children_list[i]
+        if el.tag == tag("r"):
+            return el
+        if el.tag == tag("ins"):
+            runs = children(el, "r")
+            if runs:
+                return runs[0]
+
+    return None
+
+
 def _insert_at_end(
     para: etree._Element,
     body: etree._Element,
@@ -162,11 +207,12 @@ def _insert_at_end(
     track_changes: bool,
 ) -> dict:
     """Insert text at the end of a paragraph."""
+    ref_run = _find_last_text_run(para)
     if track_changes:
-        ins = _create_ins_element(body, text, author)
+        ins = _create_ins_element(body, text, author, ref_run)
         para.append(ins)
     else:
-        r = _make_text_run(text)
+        r = _make_text_run(text, ref_run)
         para.append(r)
     return {"status": "ok", "message": f"Inserted '{text}' at end of paragraph"}
 
@@ -321,19 +367,36 @@ def _get_text_spans(para: etree._Element) -> list[tuple[etree._Element, int, int
     return spans
 
 
-def _create_ins_element(body: etree._Element, text: str, author: str) -> etree._Element:
-    """Create a w:ins element containing the text as a tracked insertion."""
+def _create_ins_element(body: etree._Element, text: str, author: str,
+                        ref_run: Optional[etree._Element] = None) -> etree._Element:
+    """Create a w:ins element containing the text as a tracked insertion.
+
+    If ref_run is provided, copies its w:rPr so inserted text matches
+    the formatting of surrounding text.
+    """
     rev_id = get_next_revision_id(body)
     ins = make_element("ins", attrib=_make_revision_attrs(author, rev_id))
-    r = _make_text_run(text)
+    r = _make_text_run(text, ref_run)
     ins.append(r)
     return ins
 
 
-def _make_text_run(text: str) -> etree._Element:
-    """Create a w:r element with a w:t child containing the text."""
+def _copy_rpr(source_run: etree._Element) -> etree._Element:
+    """Copy the w:rPr element from a source run, or return an empty one."""
+    src_rpr = child(source_run, "rPr")
+    if src_rpr is None:
+        return make_element("rPr")
+    return clone_element(src_rpr)
+
+
+def _make_text_run(text: str, ref_run: Optional[etree._Element] = None) -> etree._Element:
+    """Create a w:r element with a w:t child containing the text.
+
+    If ref_run is provided, copies its w:rPr so the new run inherits
+    formatting (font, size, bold, etc.) from the surrounding text.
+    """
     r = make_element("r")
-    rpr = make_element("rPr")
+    rpr = _copy_rpr(ref_run) if ref_run is not None else make_element("rPr")
     r.append(rpr)
     t = make_element("t", text=text)
     if text and (text[0].isspace() or text[-1].isspace()):
@@ -342,11 +405,15 @@ def _make_text_run(text: str) -> etree._Element:
     return r
 
 
-def _make_del_text_run(text: str, author: str, rev_id: int) -> etree._Element:
-    """Create a w:del element containing w:r > w:delText for deleted text."""
+def _make_del_text_run(text: str, author: str, rev_id: int,
+                       ref_run: Optional[etree._Element] = None) -> etree._Element:
+    """Create a w:del element containing w:r > w:delText for deleted text.
+
+    If ref_run is provided, copies its w:rPr for formatting consistency.
+    """
     del_el = make_element("del", attrib=_make_revision_attrs(author, rev_id))
     r = make_element("r")
-    rpr = make_element("rPr")
+    rpr = _copy_rpr(ref_run) if ref_run is not None else make_element("rPr")
     r.append(rpr)
     dt = make_element("delText", text=text)
     if text and (text[0].isspace() or text[-1].isspace()):

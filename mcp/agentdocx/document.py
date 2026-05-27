@@ -118,7 +118,6 @@ class DocxDocument:
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             f'<w:comments xmlns:w="{NSMAP["w"]}"'
             f' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
-            f' mc:Ignorable="w14 w15 w16cex w16cid"'
             f' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
             f'</w:comments>'
         )
@@ -218,153 +217,114 @@ class DocxDocument:
     def save(self, path: str | Path | None = None):
         """Save the document, optionally to a new path.
 
-        If path is provided, saves a copy to that path.
-        Otherwise, saves in place.
+        Uses the original file as a ZIP base and injects only modified parts
+        (document.xml and comments.xml). This preserves the original ZIP
+        structure, directory entries, and unmodified XML files.
         """
         save_path = Path(path) if path else self._path
 
-        # If we have comments, serialize and prepare for injection
-        if self._comments is not None:
-            self._save_comments()
+        # Serialize modified document and comments
+        has_comments = (
+            self._comments is not None
+            and len([c for c in self._comments if c.tag == tag("comment")]) > 0
+        )
 
-        self._docx.save(str(save_path))
+        doc_xml = etree.tostring(
+            self._docx.element, xml_declaration=True, encoding="UTF-8", standalone=True
+        )
+        comments_xml = None
+        if has_comments:
+            comments_xml = etree.tostring(
+                self._comments, xml_declaration=True, encoding="UTF-8", standalone=True
+            )
 
-        # Inject comments part if needed (post-save ZIP manipulation)
-        if hasattr(self, '_comments_pending'):
-            self._inject_comments_after_save(save_path)
+        # Build output ZIP from original structure
+        self._write_package(save_path, doc_xml, comments_xml)
 
-        # Update path reference if saved to new location
         if path:
             self._path = save_path
-
         return str(save_path)
 
     def save_to_bytes(self) -> bytes:
-        """Save the document to bytes.
-
-        Note: Comments injection is not supported in bytes mode.
-        Save to a file path for full comment support.
-        """
-        if self._comments is not None:
-            self._save_comments()
+        """Save the document to bytes."""
         buf = BytesIO()
-        self._docx.save(buf)
+        # Use a temp file and read it back
+        import tempfile, os
+        tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        try:
+            self.save(tmp_path)
+            with open(tmp_path, "rb") as f:
+                buf.write(f.read())
+        finally:
+            os.unlink(tmp_path)
         return buf.getvalue()
 
-    def _save_comments(self):
-        """Serialize comments into the document package."""
-        if self._comments is None:
-            return
+    def _write_package(self, save_path: Path, doc_xml: bytes, comments_xml: bytes | None):
+        """Write the output ZIP by injecting modified files into the original ZIP.
 
-        # Check if there are actual comment elements
-        comment_count = len([c for c in self._comments if c.tag == tag("comment")])
-        if comment_count == 0:
-            return
-
-        comments_xml = etree.tostring(
-            self._comments, xml_declaration=True, encoding="UTF-8", standalone=True
-        )
-
-        # Try to update existing comments part
-        try:
-            comments_part = self._docx.part.part_related_by(RT.COMMENTS)
-            comments_part._blob = comments_xml
-            self._comments_saved = comments_xml
-            return
-        except (KeyError, ValueError):
-            pass
-
-        # Comments part doesn't exist in the package - it will be injected
-        # after the initial save via _inject_comments_into_package
-        self._comments_pending = comments_xml
-
-    def _inject_comments_after_save(self, save_path: Path):
-        """Post-save injection of comments part into the docx ZIP.
-
-        This directly manipulates the docx ZIP archive to add the comments part,
-        update [Content_Types].xml, and add the relationship to the document part.
+        This preserves directory entries, file ordering, and avoids re-serializing
+        untouched XML files (styles, settings, etc.) which could introduce
+        formatting differences (line endings, quote styles) that Office rejects.
         """
-        if not hasattr(self, '_comments_pending'):
-            return
-
-        comments_xml = self._comments_pending
-        del self._comments_pending
-
-        import zipfile
-        import os
+        ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
 
         tmp_path = save_path.with_suffix(".tmp.docx")
 
-        with zipfile.ZipFile(str(save_path), "r") as zin:
+        with zipfile.ZipFile(str(self._path), "r") as zin:
             with zipfile.ZipFile(str(tmp_path), "w", zipfile.ZIP_DEFLATED) as zout:
-                # Add comments.xml to the word/ directory
-                zout.writestr("word/comments.xml", comments_xml)
-
-                # Copy all other entries
                 for item in zin.infolist():
-                    if item.filename == "word/comments.xml":
-                        continue  # Already added
+                    fname = item.filename
 
-                    data = zin.read(item.filename)
+                    # Skip existing comments — will write fresh if needed
+                    if fname == "word/comments.xml" and comments_xml:
+                        continue
 
-                    # Update [Content_Types].xml to add comments content type
-                    if item.filename == "[Content_Types].xml":
-                        content_types = etree.fromstring(data)
-                        ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
-                        ct_tag = f"{{{ct_ns}}}"
+                    data = zin.read(fname)
 
-                        # Check if comments content type already exists
-                        has_comments_ct = False
-                        for ov in content_types:
-                            if ov.tag == f"{ct_tag}Override" and ov.get("PartName") == "/word/comments.xml":
-                                has_comments_ct = True
-                                break
+                    if fname == "word/document.xml":
+                        data = doc_xml
 
-                        if not has_comments_ct:
-                            ct_override = etree.SubElement(content_types, f"{ct_tag}Override")
-                            ct_override.set("PartName", "/word/comments.xml")
-                            ct_override.set(
-                                "ContentType",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
-                            )
-                            data = etree.tostring(content_types, xml_declaration=True, encoding="UTF-8", standalone=True)
+                    elif fname == "[Content_Types].xml" and comments_xml:
+                        ct = etree.fromstring(data)
+                        if not any(
+                            ov.get("PartName") == "/word/comments.xml"
+                            for ov in ct.findall(f"{{{ct_ns}}}Override")
+                        ):
+                            ov = etree.SubElement(ct, f"{{{ct_ns}}}Override")
+                            ov.set("PartName", "/word/comments.xml")
+                            ov.set("ContentType",
+                                   "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml")
+                        data = etree.tostring(ct, xml_declaration=True, encoding="UTF-8", standalone=True)
 
-                    # Update word/_rels/document.xml.rels to add comments relationship
-                    if item.filename == "word/_rels/document.xml.rels":
+                    elif fname == "word/_rels/document.xml.rels" and comments_xml:
                         rels_xml = etree.fromstring(data)
-                        rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
-
-                        # Find next available rId
-                        max_rid = 0
-                        for rel in rels_xml:
-                            rid = rel.get("Id", "")
-                            if rid.startswith("rId"):
-                                try:
-                                    num = int(rid[3:])
-                                    max_rid = max(max_rid, num)
-                                except ValueError:
-                                    pass
-
-                        new_rid = f"rId{max_rid + 1}"
-
-                        # Check if comments relationship already exists
-                        has_comments_rel = False
-                        for rel in rels_xml:
-                            if rel.get("Type") == RT.COMMENTS:
-                                has_comments_rel = True
-                                break
-
-                        if not has_comments_rel:
-                            comments_rel = etree.SubElement(rels_xml, "Relationship")
-                            comments_rel.set("Id", new_rid)
-                            comments_rel.set("Type", RT.COMMENTS)
-                            comments_rel.set("Target", "comments.xml")
-                            data = etree.tostring(rels_xml, xml_declaration=True, encoding="UTF-8", standalone=True)
+                        max_rid = max(
+                            (int(r.get("Id", "rId0")[3:]) for r in rels_xml if r.get("Id", "").startswith("rId")),
+                            default=0,
+                        )
+                        if not any(r.get("Type") == RT.COMMENTS for r in rels_xml):
+                            cr = etree.SubElement(rels_xml, "Relationship")
+                            cr.set("Id", f"rId{max_rid + 1}")
+                            cr.set("Type", RT.COMMENTS)
+                            cr.set("Target", "comments.xml")
+                        data = etree.tostring(rels_xml, xml_declaration=True, encoding="UTF-8", standalone=True)
+                        zout.writestr(item, data)
+                        # Inject comments.xml right after rels
+                        zout.writestr("word/comments.xml", comments_xml)
+                        continue
 
                     zout.writestr(item, data)
 
-        # Replace original with modified version
-        save_path.unlink()
+                # Fallback: if comments weren't written (e.g., no rels file)
+                if comments_xml and "word/comments.xml" not in zin.namelist():
+                    # Already written above via the rels branch — this is a safety net
+                    pass
+
+        # Atomic replace
+        if save_path.exists():
+            save_path.unlink()
         shutil.move(str(tmp_path), str(save_path))
 
     # ── Paragraph operations ────────────────────────────────

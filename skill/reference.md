@@ -29,7 +29,7 @@ Specify text to find; server resolves to exact positions. **Always prefer this.*
 - `"before"` — insert before found text
 - `"after"` — insert after found text
 
-**Quote normalization**: ASCII `"` and Unicode curly `"` `"` are auto-normalized. No need to match document quote style exactly.
+**Quote normalization**: The find locator auto-normalizes between ASCII `"` and Unicode curly `""`. However, when writing `new` or `text` content in Chinese documents, **always use Chinese curly quotes** `""` `''` and Chinese punctuation (`，` `。` `、`) — the document almost always uses these and mixing styles looks unprofessional.
 
 ### Layer 2: Offset Mode
 
