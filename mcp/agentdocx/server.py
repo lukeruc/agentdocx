@@ -325,6 +325,7 @@ TOOLS = [
                 "replace_text": {"type": "string", "description": "Replacement text."},
                 "track_changes": {"type": "boolean", "description": "Use track changes for replacements."},
                 "case_sensitive": {"type": "boolean", "description": "Case-sensitive search (default true)."},
+                "author": {"type": "string", "description": "Author name for revision marks."},
             },
             "required": ["doc_id", "search_text", "replace_text"],
         },
@@ -705,9 +706,10 @@ async def _docx_delete_paragraph(doc_id: str, paragraph_index: int,
 async def _docx_find_and_replace(
     doc_id: str, search_text: str, replace_text: str,
     track_changes: bool = False, case_sensitive: bool = True,
+    author: str = "Claude",
 ) -> list[types.TextContent]:
     doc = _get_doc(doc_id)
-    result = find_and_replace(doc.body, search_text, replace_text, track_changes, case_sensitive=case_sensitive)
+    result = find_and_replace(doc.body, search_text, replace_text, track_changes, author, case_sensitive=case_sensitive)
     return _ok(result)
 
 
