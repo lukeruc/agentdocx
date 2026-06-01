@@ -36,10 +36,10 @@ docx_open → docx_search/docx_get_text → docx_batch → docx_save
 | `docx_set_paragraph_format` | Paragraph: alignment, indentation, spacing, line spacing |
 | `docx_set_style` | Apply named style (e.g. "Heading 1") |
 | `docx_set_heading` | Set as heading level 1-9 |
-| `docx_add_paragraph` | Add paragraph at end |
-| `docx_insert_paragraph` | Insert paragraph at index |
-| `docx_delete_paragraph` | Delete paragraph by index |
-| `docx_find_and_replace` | Find and replace across document |
+| `docx_add_paragraph` | Add paragraph (supports track_changes) |
+| `docx_insert_paragraph` | Insert paragraph at index (supports track_changes) |
+| `docx_delete_paragraph` | Delete paragraph by index (supports track_changes) |
+| `docx_find_and_replace` | Find and replace across document (supports track_changes) |
 | `docx_add_table` | Add table with headers and data |
 | `docx_insert_image` | Insert image |
 | `docx_set_list_format` | Bullet or numbered list |
@@ -50,19 +50,22 @@ docx_open → docx_search/docx_get_text → docx_batch → docx_save
 **Prefer semantic mode (find-based).** Avoid offset calculation.
 
 ```json
-{"op":"replace_text","paragraph_index":92,"find":"2天","new":"7个工作日","track_changes":true,"author":"Claude"}
-{"op":"insert_text","paragraph_index":92,"find":"不得拖延","position":"after","text":"新条款。","track_changes":true}
-{"op":"delete_text","paragraph_index":125,"find":"人民币人民币","track_changes":true}
-{"op":"add_comment","paragraph_index":59,"find":"42个月","text":"建议修改","author":"Claude"}
+{"op":"replace_text","paragraph_index":92,"find":"2天","new":"7个工作日","track_changes":true,"author":"吴家坤"}
+{"op":"insert_text","paragraph_index":92,"find":"不得拖延","position":"after","text":"新条款。","track_changes":true,"author":"吴家坤"}
+{"op":"delete_text","paragraph_index":125,"find":"人民币人民币","track_changes":true,"author":"吴家坤"}
+{"op":"add_comment","paragraph_index":59,"find":"42个月","text":"建议修改","author":"吴家坤"}
+{"op":"add_paragraph","text":"新增段落内容","track_changes":true,"author":"吴家坤"}
+{"op":"insert_paragraph","index":0,"text":"插入首段","track_changes":true,"author":"吴家坤"}
+{"op":"delete_paragraph","paragraph_index":5,"track_changes":true,"author":"吴家坤"}
 {"op":"set_font","paragraph_index":88,"bold":true}
 {"op":"set_heading","paragraph_index":41,"level":1}
-{"op":"find_and_replace","search_text":"CMEC","replace_text":"CMEC-GROUP","track_changes":true}
+{"op":"find_and_replace","search_text":"CMEC","replace_text":"CMEC-GROUP","track_changes":true,"author":"吴家坤"}
 ```
 
 ## Key Rules
 
 1. **Use long, specific `find` text** to avoid ambiguous matches. If multiple matches, use `{"text":"...","occurrence":N}` or `{"text":"...","context_before":"..."}`.
-2. **Always `track_changes:true`** for text modifications.
+2. **Always `track_changes:true`** for text modifications, and **set `"author"`** to identify who made each change.
 3. **Save to new file** when reviewing — don't overwrite original.
 4. Font size in half-points (12pt=24). Indentation in twips (1inch=1440).
 5. **When editing Chinese documents, use Chinese curly quotes** `""` `''` not ASCII straight quotes `""` `''`. The document text almost always uses curly quotes, and the find-based locator will auto-normalize them, but the inserted/replacement text should also use proper Chinese punctuation.
