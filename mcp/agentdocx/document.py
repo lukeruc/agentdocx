@@ -329,50 +329,36 @@ class DocxDocument:
 
     # ── Paragraph operations ────────────────────────────────
 
-    def add_paragraph(self, text: str = "", style: str | None = None) -> int:
+    def add_paragraph(self, text: str = "", style: str | None = None,
+                      track_changes: bool = False, author: str = "Claude") -> int:
         """Add a new paragraph to the end of the document.
 
+        If track_changes is True, wraps the paragraph in w:ins for revision marking.
         Returns the index of the new paragraph.
         """
-        p = make_element("p")
-        ppr = make_element("pPr")
-        p.append(ppr)
+        p = self._make_paragraph(text, style)
 
-        if style:
-            from .oxml_helpers import set_or_replace
-            set_or_replace(ppr, "pStyle", attrib={W + "val": style})
-
-        if text:
-            r = make_element("r")
-            t = make_element("t", text=text)
-            r.append(t)
-            p.append(r)
+        if track_changes:
+            p = self._wrap_in_ins(p, author)
 
         self._body.append(p)
         return len(self.paragraphs) - 1
 
-    def insert_paragraph(self, index: int, text: str = "", style: str | None = None) -> int:
+    def insert_paragraph(self, index: int, text: str = "", style: str | None = None,
+                         track_changes: bool = False, author: str = "Claude") -> int:
         """Insert a paragraph at the given index.
 
+        If track_changes is True, wraps the paragraph in w:ins for revision marking.
         Returns the index of the new paragraph.
         """
         paras = self.paragraphs
         if index < 0 or index > len(paras):
             raise IndexError(f"Paragraph index {index} out of range (0-{len(paras)})")
 
-        p = make_element("p")
-        ppr = make_element("pPr")
-        p.append(ppr)
+        p = self._make_paragraph(text, style)
 
-        if style:
-            from .oxml_helpers import set_or_replace
-            set_or_replace(ppr, "pStyle", attrib={W + "val": style})
-
-        if text:
-            r = make_element("r")
-            t = make_element("t", text=text)
-            r.append(t)
-            p.append(r)
+        if track_changes:
+            p = self._wrap_in_ins(p, author)
 
         if index == len(paras):
             self._body.append(p)
@@ -383,9 +369,71 @@ class DocxDocument:
 
         return index
 
-    def delete_paragraph(self, index: int):
-        """Delete a paragraph by index."""
+    def delete_paragraph(self, index: int,
+                         track_changes: bool = False, author: str = "Claude"):
+        """Delete a paragraph by index.
+
+        If track_changes is True, wraps the paragraph in w:del instead of removing it.
+        """
         paras = self.paragraphs
         if index < 0 or index >= len(paras):
             raise IndexError(f"Paragraph index {index} out of range (0-{len(paras) - 1})")
-        self._body.remove(paras[index])
+
+        para = paras[index]
+        parent = para.getparent()
+
+        if track_changes:
+            self._make_del_wrapper(para, author)
+        else:
+            parent.remove(para)
+
+    def _make_del_wrapper(self, para, author: str):
+        """Wrap a paragraph in a w:del element for tracked deletion.
+
+        IMPORTANT: must replace para in its parent BEFORE appending para to del_el,
+        because append() moves the element (it can only have one parent).
+        """
+        del_el = make_element("del")
+        for k, v in self._make_revision_attrs(author).items():
+            del_el.set(k, v)
+        parent = para.getparent()
+        parent.replace(para, del_el)
+        del_el.append(para)
+        return del_el
+
+    def _make_paragraph(self, text: str = "", style: str | None = None):
+        """Create a w:p element with optional text and style."""
+        p = make_element("p")
+        ppr = make_element("pPr")
+        p.append(ppr)
+
+        if style:
+            from .oxml_helpers import set_or_replace
+            set_or_replace(ppr, "pStyle", attrib={W + "val": style})
+
+        if text:
+            r = make_element("r")
+            t = make_element("t", text=text)
+            r.append(t)
+            p.append(r)
+
+        return p
+
+    def _make_revision_attrs(self, author: str):
+        """Create w:id, w:author, w:date attributes for a revision element."""
+        import datetime
+        rev_id = get_next_revision_id(self._body)
+        return {
+            W + "id": str(rev_id),
+            W + "author": author,
+            W + "date": datetime.datetime.now().isoformat(),
+        }
+
+    def _wrap_in_ins(self, para, author: str):
+        """Wrap a paragraph in a w:ins element for tracked insertion."""
+        ins = make_element("ins")
+        for k, v in self._make_revision_attrs(author).items():
+            ins.set(k, v)
+        ins.append(para)
+        return ins
+

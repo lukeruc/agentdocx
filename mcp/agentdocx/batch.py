@@ -317,6 +317,8 @@ def _op_add_paragraph(doc: DocxDocument, op: dict, para_shift: int) -> tuple[dic
     idx = doc.add_paragraph(
         op.get("text", ""),
         op.get("style"),
+        op.get("track_changes", False),
+        op.get("author", "Claude"),
     )
     return {"status": "ok", "paragraph_index": idx, "message": f"Added paragraph at {idx}"}, 0
 
@@ -327,6 +329,8 @@ def _op_insert_paragraph(doc: DocxDocument, op: dict, para_shift: int) -> tuple[
         op["index"],
         op.get("text", ""),
         op.get("style"),
+        op.get("track_changes", False),
+        op.get("author", "Claude"),
     )
     return {"status": "ok", "paragraph_index": idx, "message": f"Inserted paragraph at {idx}"}, 0
 
@@ -334,7 +338,11 @@ def _op_insert_paragraph(doc: DocxDocument, op: dict, para_shift: int) -> tuple[
 def _op_delete_paragraph(doc: DocxDocument, op: dict, para_shift: int) -> tuple[dict, int]:
     """Execute delete_paragraph by index."""
     pi = op["paragraph_index"]
-    doc.delete_paragraph(pi)
+    doc.delete_paragraph(
+        pi,
+        op.get("track_changes", False),
+        op.get("author", "Claude"),
+    )
     return {"status": "ok", "message": f"Deleted paragraph {pi}"}, 0
 
 

@@ -271,20 +271,22 @@ TOOLS = [
     },
     {
         "name": "docx_add_paragraph",
-        "description": "Add a new paragraph to the end of the document.",
+        "description": "Add a new paragraph to the end of the document. Supports track_changes for revision marking.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "doc_id": {"type": "string", "description": "The document ID."},
                 "text": {"type": "string", "description": "Paragraph text."},
                 "style": {"type": "string", "description": "Optional style name (e.g., 'Heading 1')."},
+                "track_changes": {"type": "boolean", "description": "Wrap the new paragraph in w:ins for revision tracking."},
+                "author": {"type": "string", "description": "Author name for revision marks."},
             },
             "required": ["doc_id"],
         },
     },
     {
         "name": "docx_insert_paragraph",
-        "description": "Insert a paragraph at a specific index.",
+        "description": "Insert a paragraph at a specific index. Supports track_changes for revision marking.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -292,18 +294,22 @@ TOOLS = [
                 "index": {"type": "integer", "description": "Insert position (0=beginning)."},
                 "text": {"type": "string", "description": "Paragraph text."},
                 "style": {"type": "string", "description": "Optional style name."},
+                "track_changes": {"type": "boolean", "description": "Wrap the new paragraph in w:ins for revision tracking."},
+                "author": {"type": "string", "description": "Author name for revision marks."},
             },
             "required": ["doc_id", "index"],
         },
     },
     {
         "name": "docx_delete_paragraph",
-        "description": "Delete a paragraph by index.",
+        "description": "Delete a paragraph by index. Use track_changes=True to wrap in w:del instead of removing.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "doc_id": {"type": "string", "description": "The document ID."},
                 "paragraph_index": {"type": "integer", "description": "Paragraph index to delete."},
+                "track_changes": {"type": "boolean", "description": "Wrap the paragraph in w:del for revision tracking."},
+                "author": {"type": "string", "description": "Author name for revision marks."},
             },
             "required": ["doc_id", "paragraph_index"],
         },
@@ -671,23 +677,26 @@ async def _docx_set_heading(
 
 # ── Paragraph ops ───────────────────────────────────────────────
 
-async def _docx_add_paragraph(doc_id: str, text: str = "", style: Optional[str] = None) -> list[types.TextContent]:
+async def _docx_add_paragraph(doc_id: str, text: str = "", style: Optional[str] = None,
+                               track_changes: bool = False, author: str = "Claude") -> list[types.TextContent]:
     doc = _get_doc(doc_id)
-    idx = doc.add_paragraph(text, style)
+    idx = doc.add_paragraph(text, style, track_changes, author)
     return _ok({"status": "ok", "message": f"Added paragraph at index {idx}", "paragraph_index": idx})
 
 
 async def _docx_insert_paragraph(
     doc_id: str, index: int, text: str = "", style: Optional[str] = None,
+    track_changes: bool = False, author: str = "Claude",
 ) -> list[types.TextContent]:
     doc = _get_doc(doc_id)
-    idx = doc.insert_paragraph(index, text, style)
+    idx = doc.insert_paragraph(index, text, style, track_changes, author)
     return _ok({"status": "ok", "message": f"Inserted paragraph at index {idx}", "paragraph_index": idx})
 
 
-async def _docx_delete_paragraph(doc_id: str, paragraph_index: int) -> list[types.TextContent]:
+async def _docx_delete_paragraph(doc_id: str, paragraph_index: int,
+                                  track_changes: bool = False, author: str = "Claude") -> list[types.TextContent]:
     doc = _get_doc(doc_id)
-    doc.delete_paragraph(paragraph_index)
+    doc.delete_paragraph(paragraph_index, track_changes, author)
     return _ok({"status": "ok", "message": f"Deleted paragraph {paragraph_index}"})
 
 
