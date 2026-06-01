@@ -363,7 +363,7 @@ def _get_text_spans(para: etree._Element) -> list[tuple[etree._Element, int, int
                 dt = "".join(d.text or "" for d in r.iter(tag("delText")))
                 if dt:
                     spans.append((child_el, offset, offset + len(dt), dt))
-                    offset += len(t)
+                    offset += len(dt)
     return spans
 
 
