@@ -416,50 +416,68 @@ def set_heading(
 
 # ── Bullet and numbering ────────────────────────────────────────
 
+_LIST_PREFIXES = {
+    "bullet": "• ",
+    "number": "1. ",
+}
+_LIST_INDENT = {"bullet": 720, "number": 720}  # twips
+
 
 def set_list_format(
     para: etree._Element,
-    list_type: str = "bullet",  # "bullet", "number"
+    list_type: str = "bullet",  # "bullet", "number", or "none"
     level: int = 0,
 ) -> dict:
-    """Apply bullet or numbered list formatting to a paragraph.
+    """Apply or remove bullet/numbered list formatting on a paragraph.
 
-    Note: Proper list formatting requires the numbering definitions in the
-    document. This sets the basic paragraph properties for list items.
-
-    Args:
-        para: The w:p paragraph element.
-        list_type: "bullet" or "number".
-        level: List indentation level (0-based).
-
-    Returns:
-        dict with status info.
+    list_type="none" removes any existing list indent and prefix.
     """
     ppr = ensure_pPr(para)
 
-    # Set indentation for list
+    if list_type == "none":
+        return _remove_list_format(para, ppr)
+
+    # Apply list indent
+    base = _LIST_INDENT.get(list_type, 720)
     indent_attrib = {
-        W + "left": str(720 + level * 360),  # 0.5 inch + level
+        W + "left": str(base + level * 360),
         W + "hanging": "360",
     }
     set_or_replace(ppr, "ind", attrib=indent_attrib)
 
-    # Add list character
-    if list_type == "bullet":
-        prefix = "• "  # bullet
-    else:
-        prefix = "1. "
-
-    # Check if there's existing text - if so, prepend the prefix
+    # Prepend list prefix
+    prefix = _LIST_PREFIXES.get(list_type, "• ")
     runs = children(para, "r")
     if runs:
         t = child(runs[0], "t")
-        if t is not None and t.text:
-            if not t.text.startswith(prefix):
-                t.text = prefix + t.text
+        if t is not None and t.text and not t.text.startswith(prefix):
+            t.text = prefix + t.text
     else:
         r = make_element("r")
         r.append(make_element("t", text=prefix))
         para.append(r)
 
-    return {"status": "ok", "message": f"Applied {list_type} list formatting at level {level}"}
+    return {"status": "ok", "message": f"Applied {list_type} list at level {level}"}
+
+
+def _remove_list_format(para: etree._Element, ppr: etree._Element) -> dict:
+    """Strip list indentation and prefix from a paragraph."""
+    changes = []
+
+    ind_el = child(ppr, "ind")
+    if ind_el is not None:
+        ppr.remove(ind_el)
+        changes.append("indentation")
+
+    runs = children(para, "r")
+    if runs:
+        t = child(runs[0], "t")
+        if t is not None and t.text:
+            for prefix in _LIST_PREFIXES.values():
+                if t.text.startswith(prefix):
+                    t.text = t.text[len(prefix):]
+                    changes.append("prefix removed")
+                    break
+
+    msg = ", ".join(changes) if changes else "no list formatting"
+    return {"status": "ok", "message": f"Removed list: {msg}"}

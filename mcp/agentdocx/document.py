@@ -90,8 +90,21 @@ class DocxDocument:
 
     @property
     def paragraphs(self):
-        """Return paragraph elements directly."""
-        return children(self._body, "p")
+        """Return all paragraph elements including those inside w:ins wrappers.
+
+        This is important for track changes: paragraphs wrapped in w:ins (added
+        with track_changes=True) need to be visible to the indexing system so
+        find-based operations can locate them.
+        """
+        paras = []
+        for child_el in self._body:
+            if child_el.tag == tag("p"):
+                paras.append(child_el)
+            elif child_el.tag == tag("ins"):
+                # Also include paragraphs inside tracked insertions
+                ins_paras = children(child_el, "p")
+                paras.extend(ins_paras)
+        return paras
 
     @property
     def paragraph_count(self) -> int:
@@ -329,6 +342,18 @@ class DocxDocument:
 
     # ── Paragraph operations ────────────────────────────────
 
+    def _insert_before_sectPr(self, element):
+        """Insert an element into body before the sectPr (section properties).
+
+        w:sectPr must be the last child of w:body per OOXML spec.
+        """
+        sectPr = child(self._body, "sectPr")
+        if sectPr is not None:
+            from .oxml_helpers import insert_before
+            insert_before(sectPr, element)
+        else:
+            self._body.append(element)
+
     def add_paragraph(self, text: str = "", style: str | None = None,
                       track_changes: bool = False, author: str = "Claude") -> int:
         """Add a new paragraph to the end of the document.
@@ -341,7 +366,7 @@ class DocxDocument:
         if track_changes:
             p = self._wrap_in_ins(p, author)
 
-        self._body.append(p)
+        self._insert_before_sectPr(p)
         return len(self.paragraphs) - 1
 
     def insert_paragraph(self, index: int, text: str = "", style: str | None = None,
@@ -360,8 +385,8 @@ class DocxDocument:
         if track_changes:
             p = self._wrap_in_ins(p, author)
 
-        if index == len(paras):
-            self._body.append(p)
+        if index >= len(paras):
+            self._insert_before_sectPr(p)
         else:
             target = paras[index]
             from .oxml_helpers import insert_before

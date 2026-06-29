@@ -363,13 +363,13 @@ TOOLS = [
     },
     {
         "name": "docx_set_list_format",
-        "description": "Apply bullet or numbered list formatting to a paragraph.",
+        "description": "Apply or remove bullet/numbered list formatting. Use list_type='none' to remove.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "doc_id": {"type": "string", "description": "The document ID."},
                 "paragraph_index": {"type": "integer", "description": "Paragraph index."},
-                "list_type": {"type": "string", "description": "'bullet' or 'number'."},
+                "list_type": {"type": "string", "description": "'bullet', 'number', or 'none' (removes list formatting)."},
                 "level": {"type": "integer", "description": "List nesting level (0-based)."},
             },
             "required": ["doc_id", "paragraph_index"],
@@ -392,17 +392,19 @@ TOOLS = [
                 "doc_id": {"type": "string", "description": "The document ID."},
                 "operations": {
                     "type": "string",
-                    "description": "JSON array of operations. Use SEMANTIC MODE (find-based) — no offset calculation. "
+                    "description": "JSON array of operations (inline). Use SEMANTIC MODE (find-based) — no offset calculation. "
                                    "replace_text: paragraph_index, find, new. "
                                    "insert_text: paragraph_index, find, position(before/after), text. "
                                    "delete_text: paragraph_index, find, occurrence(optional). "
                                    "add_comment: paragraph_index, find, text. "
-                                   "find can be a string or {text, occurrence, context_before, context_after}. "
-                                   "Use long specific find text to avoid ambiguous matches. "
-                                   "set_font/set_paragraph_format/set_style/set_heading: paragraph_index, props.",
+                                   "find can be a string or {text, occurrence, context_before, context_after}.",
+                },
+                "json_path": {
+                    "type": "string",
+                    "description": "Path to a .json file containing the operations array. Alternative to 'operations'.",
                 },
             },
-            "required": ["doc_id", "operations"],
+            "required": ["doc_id"],
         },
     },
 ]
@@ -756,8 +758,13 @@ async def _docx_set_list_format(
 
 # ── Batch operations ────────────────────────────────────────────
 
-async def _docx_batch(doc_id: str, operations: str) -> list[types.TextContent]:
+async def _docx_batch(doc_id: str, operations: str = "", json_path: str = "") -> list[types.TextContent]:
     doc = _get_doc(doc_id)
+    if json_path and not operations:
+        with open(json_path, "r", encoding="utf-8") as f:
+            operations = f.read()
+    elif not operations:
+        return _ok({"status": "error", "message": "Either operations or json_path is required"})
     result = execute_batch(doc, operations)
     return _ok(result)
 
