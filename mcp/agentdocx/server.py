@@ -21,7 +21,7 @@ from mcp.server.stdio import stdio_server
 import mcp.types as types
 
 from .document import DocxDocument
-from .track_changes import insert_text, delete_text
+from .track_changes import insert_text, delete_text, resolve_revisions
 from .comments import add_comment, delete_comment, list_comments
 from .formatting import set_font, set_paragraph_format, set_style
 from .batch import execute_batch
@@ -376,6 +376,25 @@ TOOLS = [
         },
     },
     {
+        "name": "docx_resolve_revisions",
+        "description": "Accept or reject tracked changes (w:ins/w:del) in the document. "
+                       "action='accept' keeps insertions and applies deletions; "
+                       "action='reject' removes insertions and restores deleted text. "
+                       "Optionally restrict to a paragraph range or filter by author.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "description": "The document ID."},
+                "action": {"type": "string", "description": "'accept' or 'reject'.", "enum": ["accept", "reject"]},
+                "paragraph_index": {"type": "integer", "description": "Process a single paragraph (0-based)."},
+                "start_index": {"type": "integer", "description": "Start paragraph index for a range (inclusive)."},
+                "end_index": {"type": "integer", "description": "End paragraph index for a range (inclusive)."},
+                "author": {"type": "string", "description": "Only resolve revisions by this author."},
+            },
+            "required": ["doc_id", "action"],
+        },
+    },
+    {
         "name": "docx_batch",
         "description": (
             "Execute multiple operations in a single call. Two modes:\n"
@@ -467,6 +486,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
             return await _docx_insert_image(**arguments)
         elif name == "docx_set_list_format":
             return await _docx_set_list_format(**arguments)
+        elif name == "docx_resolve_revisions":
+            return await _docx_resolve_revisions(**arguments)
         elif name == "docx_batch":
             return await _docx_batch(**arguments)
         else:
@@ -753,6 +774,36 @@ async def _docx_set_list_format(
     if paragraph_index < 0 or paragraph_index >= len(paras):
         return _ok({"status": "error", "message": f"Paragraph {paragraph_index} out of range (0-{len(paras)-1})"})
     result = set_list_format(paras[paragraph_index], list_type, level)
+    return _ok(result)
+
+
+# ── Resolve (accept/reject) revisions ────────────────────────────
+
+async def _docx_resolve_revisions(
+    doc_id: str, action: str,
+    paragraph_index: Optional[int] = None,
+    start_index: Optional[int] = None,
+    end_index: Optional[int] = None,
+    author: Optional[str] = None,
+) -> list[types.TextContent]:
+    """Accept or reject tracked changes in a paragraph range (default: all)."""
+    doc = _get_doc(doc_id)
+    paras = doc.paragraphs
+    n = len(paras)
+
+    # Determine range
+    if paragraph_index is not None:
+        if paragraph_index < 0 or paragraph_index >= n:
+            return _ok({"status": "error", "message": f"paragraph_index {paragraph_index} out of range (0-{n-1})"})
+        target_paras = [paras[paragraph_index]]
+    else:
+        si = start_index if start_index is not None else 0
+        ei = end_index if end_index is not None else n - 1
+        if si < 0 or ei >= n or si > ei:
+            return _ok({"status": "error", "message": f"range [{si},{ei}] invalid for {n} paragraphs"})
+        target_paras = paras[si:ei + 1]
+
+    result = resolve_revisions(target_paras, action, author)
     return _ok(result)
 
 

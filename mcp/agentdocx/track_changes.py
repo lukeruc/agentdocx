@@ -336,6 +336,99 @@ def _delete_text_direct(
     }
 
 
+# ── Resolve (accept/reject) revisions ───────────────────────────
+
+
+def resolve_revisions(
+    paras: list[etree._Element],
+    action: str = "accept",
+    author: Optional[str] = None,
+) -> dict:
+    """Accept or reject tracked changes (w:ins / w:del) in given paragraphs.
+
+    Args:
+        paras: list of w:p elements to process.
+        action: "accept" keeps insertions and applies deletions;
+                "reject" removes insertions and restores deleted text.
+        author: if given, only resolve revisions by this author.
+
+    Returns:
+        dict with counts of resolved insertions/deletions.
+    """
+    if action not in ("accept", "reject"):
+        return {"status": "error", "message": "action must be 'accept' or 'reject'"}
+
+    ins_resolved = 0
+    del_resolved = 0
+
+    for para in paras:
+        i_count, d_count = _resolve_in_para(para, action, author)
+        ins_resolved += i_count
+        del_resolved += d_count
+
+    return {
+        "status": "ok",
+        "action": action,
+        "ins_resolved": ins_resolved,
+        "del_resolved": del_resolved,
+        "message": f"{action}ed {ins_resolved} insertion(s) and {del_resolved} deletion(s)",
+    }
+
+
+def _author_matches(el: etree._Element, author: Optional[str]) -> bool:
+    """Check if a revision element's w:author matches the given author."""
+    if author is None:
+        return True
+    return el.get(W + "author", "") == author
+
+
+def _resolve_in_para(para: etree._Element, action: str, author: Optional[str]) -> tuple[int, int]:
+    """Resolve all w:ins/w:del in a single paragraph. Returns (ins_count, del_count)."""
+    ins_count = 0
+    del_count = 0
+
+    # Collect revision elements first (modifying tree during iteration breaks it)
+    ins_elements = [c for c in para if c.tag == tag("ins") and _author_matches(c, author)]
+    del_elements = [c for c in para if c.tag == tag("del") and _author_matches(c, author)]
+
+    # Also handle paragraph-level ins/del wrappers (from add_paragraph/insert_paragraph
+    # with track_changes=True). These are w:ins/w:del containing w:p, at body level.
+    # But within a paragraph context, we handle inline ins/del here.
+
+    for ins_el in ins_elements:
+        if action == "accept":
+            # Keep inserted runs: unwrap w:ins, replace with its child runs
+            runs = children(ins_el, "r")
+            parent = ins_el.getparent()
+            idx = list(parent).index(ins_el)
+            for j, r in enumerate(runs):
+                parent.insert(idx + j, r)
+            parent.remove(ins_el)
+        else:
+            # reject: remove inserted runs entirely
+            ins_el.getparent().remove(ins_el)
+        ins_count += 1
+
+    for del_el in del_elements:
+        if action == "accept":
+            # accept deletion: remove the deleted text entirely
+            del_el.getparent().remove(del_el)
+        else:
+            # reject deletion: restore deleted text as normal runs
+            runs = children(del_el, "r")
+            parent = del_el.getparent()
+            idx = list(parent).index(del_el)
+            for j, r in enumerate(runs):
+                # Convert w:delText back to w:t
+                for dt in r.findall(tag("delText")):
+                    dt.tag = tag("t")
+                parent.insert(idx + j, r)
+            parent.remove(del_el)
+        del_count += 1
+
+    return ins_count, del_count
+
+
 # ── Internal helpers ────────────────────────────────────────────
 
 
